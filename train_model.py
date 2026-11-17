@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 import cv2
+import concurrent.futures
 import argparse
 
 from img2feat import CNN
@@ -25,10 +26,10 @@ def extract_features( net, img, code, rect, roi, roi_rect ):
     '''
 
 def regression( X, Y ):
+    '''
     model = LinearRegression()
     model.fit( X, Y )
     return model
-
     '''
     # ensemble learning with bagging
     base_estimator = LinearRegression()
@@ -37,7 +38,7 @@ def regression( X, Y ):
     model = BaggingRegressor( base_estimator=LinearRegression(), n_estimators=n_estimators, max_features=max_features )
     model.fit( X, Y )
     return model
-    '''
+
 ##################################################
 
 def code2label( code ):
@@ -53,28 +54,38 @@ def code2label( code ):
 
     return label
 
+def process_single_file(file, net):
+    basename = os.path.basename(file)
+    img = cv2.imread(file)
+    if img is None:
+        return None
+    (code, rect), (roi, roi_rect) = detect_roi(img)
+    if roi is not None:
+        y_val = code2label(code)
+        if y_val is not None:
+            f = extract_features(net, img, code, rect, roi, roi_rect)
+            return basename, code, y_val, f
+    return None
+
+
+
 def main( dir_imgs, network, model_name ):
     net = CNN(network)
 
     files = glob.glob( '{}/*'.format(dir_imgs) )
     X = None
     Y = None
-
-    for file in files:
-        basename = os.path.basename(file)
-        img = cv2.imread( file )
-        (code, rect), (roi, roi_rect) = detect_roi( img )
-        if( roi is not None ):
-            y = code2label( code )
-            if( y is not None ):
-                print( basename, code, y )
-
-                f = extract_features( net, img, code, rect, roi, roi_rect )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        results = executor.map(lambda f: process_single_file(f,net), files)
+        for res in results:
+            if res is not None:
+                basename, code, y_val, f=res
                 nb_f = f.shape[0]
+                y_arr = np.ones((nb_f,), dtype=np.int) * y_val
 
-                y = np.ones( (nb_f,), dtype=np.int ) * y
-                X = f if (X is None) else np.concatenate( (X,f), axis=0 )
-                Y = y if (Y is None) else np.concatenate( (Y,y), axis=0 )
+                X = f if (X is None) else np.concatenate((X,f), axis=0)
+                Y = y_arr if (Y is None) else np.concatenate((Y,y_arr), axis=0)
+                print(basename,code,y_arr)
 
     model = regression( X, Y )
 
@@ -92,6 +103,7 @@ def main( dir_imgs, network, model_name ):
             x = net( [roi] )
             y = model.predict(x)
             print(basename, code, y[0])
+
     print( model_name )
 
 if( __name__ == '__main__' ):
