@@ -29,7 +29,7 @@ def extract_features( net, img, code, rect, roi, roi_rect ):
     roi_gray_3ch = cv2.cvtColor(roi_gray, cv2.COLOR_GRAY2BGR)
     f_gray = net([roi_gray_3ch])
 
-    f = np.concatenate((f_original, f_mirror, f_masked, f_gray), axis = 0)
+    f = np.concatenate((f_original, f_mirror, f_masked), axis = 0)
     return f
 
     '''
